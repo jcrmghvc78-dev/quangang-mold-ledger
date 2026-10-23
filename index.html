@@ -568,6 +568,7 @@ function renderToolbar(){
     ${s.editable ? `
       <button class="btn ghost small" id="btnAddRow" title="新增一行">${ICONS.plus} 新增行</button>
       <button class="btn ghost small" id="btnAddCol" title="在当前表末尾添加一列">${ICONS.cols} 添加列</button>
+      <button class="btn ghost small" id="btnDelCol" title="删除当前表的一列（整列数据清除）">${ICONS.del2} 删除列</button>
       <button class="btn danger small" id="btnDelSel" title="删除选中的行" style="display:none">${ICONS.del2} 删除选中</button>
     ` : ''}
     <button class="btn ghost small" id="btnCols" title="选择显示哪些列">${ICONS.cols} 列设置${hidden.size ? ` (${hidden.size})` : ''}</button>
@@ -622,6 +623,8 @@ function renderToolbar(){
   if(addBtn) addBtn.addEventListener('click', () => addRow(s.id));
   const colBtn = document.getElementById('btnAddCol');
   if(colBtn) colBtn.addEventListener('click', () => addColumn(s.id));
+  const delColBtn = document.getElementById('btnDelCol');
+  if(delColBtn) delColBtn.addEventListener('click', () => deleteColumn(s.id));
   const delBtn = document.getElementById('btnDelSel');
   if(delBtn) delBtn.addEventListener('click', () => deleteSelected(s.id));
   document.getElementById('btnCols').addEventListener('click', e => toggleColPop(e, s));
@@ -894,6 +897,45 @@ function addColumn(sid){
     ui.page[sid] = Math.max(1, Math.ceil(s.rows.length / (PAGE_SIZES[sid] || 50)));
     markDirty(); saveDB(); renderAll();
     toast(`已添加列「${name}」`, 'ok');
+  });
+}
+function selectDialog(title, placeholder, options){
+  return new Promise(resolve => {
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmText').innerHTML = `<div style="font-size:12px;color:var(--ink3);margin-bottom:6px">${escHtml(placeholder)}</div><select id="promptSelect" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;outline:none">${options.map((o, i) => `<option value="${i}">${escAttr(String(o))}</option>`).join('')}</select>`;
+    document.getElementById('confirmModal').classList.add('show');
+    const ok = document.getElementById('confirmOk');
+    const cancel = document.getElementById('confirmCancel');
+    const done = v => {
+      document.getElementById('confirmModal').classList.remove('show');
+      ok.onclick = cancel.onclick = null;
+      resolve(v);
+    };
+    ok.onclick = () => done(Number(document.getElementById('promptSelect').value));
+    cancel.onclick = () => done(null);
+  });
+}
+function deleteColumn(sid){
+  const s = sheetById(sid);
+  if(!s || !s.editable) return;
+  if(s.headers.length <= 1){ toast('至少保留一列', 'warn'); return; }
+  selectDialog('删除列', '选择要删除的列（该列整列数据会被清除）：', s.headers).then(idx => {
+    if(idx === null || idx === undefined || isNaN(idx)) return;
+    if(idx === 0 && s.headers[0] === '序号'){ toast('「序号」列不能删除', 'warn'); return; }
+    const name = String(s.headers[idx]);
+    confirmDialog('删除列', `确定删除列「<b style="color:var(--danger)">${escHtml(name)}</b>」吗？<br>该列所有行的数据将被<b>清除且不可恢复</b>。`).then(ok => {
+      if(!ok) return;
+      s.headers.splice(idx, 1);
+      s.rows.forEach(r => r.splice(idx, 1));
+      const hid = ui.hidden[s.id];
+      const newHid = new Set();
+      hid.forEach(i => { if(i < idx) newHid.add(i); else if(i > idx) newHid.add(i - 1); });
+      ui.hidden[s.id] = newHid;
+      if(ui.sort[s.id] && ui.sort[s.id].col > idx) ui.sort[s.id].col--;
+      ui.filters[s.id] = (ui.filters[s.id] || []).map(f => ({ col: f.col > idx ? f.col - 1 : f.col, val: f.val })).filter(f => f.col !== idx);
+      markDirty(); saveDB(); renderAll();
+      toast(`已删除列「${name}」`, 'ok');
+    });
   });
 }
 function deleteRow(sid, gidx){
@@ -1203,7 +1245,7 @@ const HELP_HTML = `
 <h4>修改</h4>
 <ul>
   <li><b>双击单元格</b>直接编辑；点击行尾铅笔图标可编辑整行（所有字段）；</li>
-  <li>「新增行」在末尾添加空行（主表/模壳自动编号）；「添加列」可在当前表末尾新增一列（自定义列名，新列全表为空，双击即可填写）；勾选行后点「删除选中」批量删除；</li>
+  <li>「新增行」在末尾添加空行（主表/模壳自动编号）；「添加列」可在当前表末尾新增一列（自定义列名，新列全表为空，双击即可填写）；「删除列」可移除不需要的列（有二次确认，整列数据清除后不可恢复）；勾选行后点「删除选中」批量删除；</li>
   <li>修改自动保存到<b>本机浏览器</b>，右上角显示保存状态；「重置」可恢复最初导入的原始数据。</li>
 </ul>
 <h4>导出与更新原表</h4>
