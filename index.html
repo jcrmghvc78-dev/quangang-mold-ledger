@@ -649,15 +649,29 @@ function escHtml(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-/* ================= 空白行过滤 ================= */
+/* ================= 空白单元格处理（仅查询时生效） ================= */
 function isBlankRow(r){
   if(!r || !r.length) return true;
   return r.every(v => String(v === null || v === undefined ? '' : v).trim() === '');
 }
+function isQueryActive(s){
+  return ((ui.q[s.id] || '').trim() !== '') || ((ui.filters[s.id] || []).length > 0);
+}
+function colHasVal(rows, i){
+  return rows.some(x => String(x.r[i] === null || x.r[i] === undefined ? '' : x.r[i]).trim() !== '');
+}
 function visibleRows(s){
   const all = filteredRows(s);
+  if(!isQueryActive(s)) return all;               // 正常浏览/编辑：不隐藏任何行
   const fresh = ui.newRows[s.id] || new Set();
-  return all.filter(x => !(isBlankRow(x.r) && !fresh.has(x.i)));
+  return all.filter(x => !(isBlankRow(x.r) && !fresh.has(x.i)));   // 仅查询时隐藏空白行
+}
+function queryCols(s, visible){
+  const hidden = ui.hidden[s.id];
+  const qa = isQueryActive(s);
+  let cols = s.headers.map((_, i) => i).filter(i => !hidden.has(i));
+  if(qa) cols = cols.filter(i => colHasVal(visible, i));   // 仅查询时隐藏结果中整列全空的列
+  return cols;
 }
 
 /* ================= 渲染：元信息与分页 ================= */
@@ -666,8 +680,10 @@ function renderMeta(){
   if(!s){ document.getElementById('meta').innerHTML = ''; return; }
   const all = filteredRows(s);
   const visible = visibleRows(s);
+  const qa = isQueryActive(s);
   const total = s.rows.length;
   const hiddenBlank = all.length - visible.length;
+  const tmpCols = qa ? s.headers.map((_, i) => i).filter(i => !ui.hidden[s.id].has(i)).filter(i => !colHasVal(visible, i)).length : 0;
   const size = PAGE_SIZES[s.id] || 50;
   const pages = Math.max(1, Math.ceil(visible.length / size));
   if(ui.page[s.id] > pages) ui.page[s.id] = pages;
@@ -677,6 +693,7 @@ function renderMeta(){
   let html = `<span>共 <b>${total}</b> 条记录</span>`;
   if(all.length !== total) html += `<span>筛选出 <b>${all.length}</b> 条</span>`;
   if(hiddenBlank) html += `<span style="color:var(--ink3)">已隐藏 ${hiddenBlank} 条空白记录</span>`;
+  if(tmpCols) html += `<span style="color:var(--ink3)">查询中隐藏 ${tmpCols} 列空白列</span>`;
   if(hiddenN) html += `<span style="color:var(--ink3)">已隐藏 ${hiddenN} 列</span>`;
   if(selN) html += `<span style="color:var(--accent)">已选 ${selN} 条</span>`;
   html += `<div class="pager">
@@ -697,8 +714,8 @@ function renderTable(){
   const wrap = document.getElementById('tblWrap');
   if(!s){ wrap.innerHTML = ''; return; }
   const hidden = ui.hidden[s.id];
-  const cols = s.headers.map((_, i) => i).filter(i => !hidden.has(i));
   const visible = visibleRows(s);
+  const cols = queryCols(s, visible);
   const size = PAGE_SIZES[s.id] || 50;
   const pages = Math.max(1, Math.ceil(visible.length / size));
   const p = Math.min(ui.page[s.id], pages);
@@ -723,7 +740,7 @@ function renderTable(){
 
   let body = '';
   if(!pageRows.length){
-    body = `<tr class="empty-row"><td colspan="${cols.length + (s.editable ? 2 : 0)}">没有匹配的记录，试试调整搜索或筛选条件</td></tr>`;
+    body = `<tr class="empty-row"><td colspan="${Math.max(1, cols.length + (s.editable ? 2 : 0))}">没有匹配的记录，试试调整搜索或筛选条件</td></tr>`;
   } else {
     pageRows.forEach(x => {
       const selCls = sel.has(x.i) ? ' sel' : '';
@@ -1255,7 +1272,7 @@ const HELP_HTML = `
 </ul>
 <h4>查询</h4>
 <ul>
-  <li>顶部搜索框：按任意字段模糊搜索（模号、花纹、厂家、规格、日期等）；整行全空的记录自动隐藏（底部统计会注明），新添加的空行不受影响；</li>
+  <li>顶部搜索框：按任意字段模糊搜索（模号、花纹、厂家、规格、日期等）；查询/筛选结果中自动隐藏整行空白与整列空白（底部统计会注明），正常浏览与编辑时显示全部；</li>
   <li>筛选：选择列和值后点「+ 筛选」，可叠加多个条件，点 × 移除；</li>
   <li>点击表头按该列排序（再点切换升/降序），「列设置」可隐藏不常用的列。</li>
 </ul>
